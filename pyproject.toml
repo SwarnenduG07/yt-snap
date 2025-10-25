@@ -1,7 +1,7 @@
 [project]
 name = "ytsnap"
 version = "0.1.0"
-description = "Fast and independent YouTube video downloader"
+description = "A modern, community-driven alternative to yt-dlp for downloading YouTube videos"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}

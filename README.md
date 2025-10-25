@@ -1,6 +1,34 @@
 # ytsnap
 
-Fast and independent YouTube video downloader built from scratch.
+A modern, community-driven alternative to yt-dlp. Built from scratch for simplicity, speed, and extensibility.
+
+[![PyPI version](https://badge.fury.io/py/ytsnap.svg)](https://pypi.org/project/ytsnap/)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Hacktoberfest](https://img.shields.io/badge/Hacktoberfest-friendly-blueviolet)](https://hacktoberfest.com/)
+
+## Why ytsnap over yt-dlp?
+
+- 🚀 **Lightweight**: Minimal dependencies, just requests library
+- 🔄 **Modern API**: Uses YouTube's official innertube API
+- 🛠 **Simple Architecture**: Easy to understand and contribute to
+- 📦 **Fast Installation**: No complex build process
+- 🔧 **Maintainable**: Built with modern Python practices
+- 👥 **Community First**: Designed for community contributions
+
+## Hacktoberfest 2025 🎃
+
+This repository is participating in Hacktoberfest 2025! We welcome contributions from the community.
+
+### How to Contribute
+
+1. Check out our [CONTRIBUTING.md](CONTRIBUTING.md) guide
+2. Look for issues labeled with `hacktoberfest` or `good first issue`
+3. Fork the repository and create your branch
+4. Make your changes and submit a pull request
+5. Wait for review and address any feedback
+
+Please ensure you read our [Code of Conduct](CODE_OF_CONDUCT.md) before contributing.
 
 ## Installation
 
@@ -60,6 +88,18 @@ downloader.download("video.mp4", itag=18)
 ## How it works
 
 Uses YouTube's official innertube API with Android client credentials to fetch direct CDN URLs without signature decryption complexity.
+
+## Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Areas for Contribution
+
+- 🐛 Bug fixes
+- ✨ New features
+- 📝 Documentation improvements
+- 🧪 Test coverage
+- 🎨 Code quality improvements
 
 ## License
 
