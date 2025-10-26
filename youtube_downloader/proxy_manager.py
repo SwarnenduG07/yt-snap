@@ -175,7 +175,14 @@ class ProxyManager:
                 return None
         else:
             host = url_part
-            port = 80 if scheme in ('http', 'socks4', 'socks5') else 443
+            if scheme == 'http':
+                port = 80
+            elif scheme == 'https':
+                port = 443
+            elif scheme in ('socks4', 'socks5'):
+                port = 1080
+            else:
+                port = 80
         
         return ProxyConfig(
             scheme=scheme.lower(),

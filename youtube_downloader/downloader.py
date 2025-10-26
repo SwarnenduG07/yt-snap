@@ -9,6 +9,7 @@ class YouTubeDownloader:
         self.url = url
         self.video_id = self._extract_video_id(url)
         self.proxy_manager = proxy_manager
+        self._active_proxy = None  # type: Optional[ProxyConfig]
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -29,24 +30,33 @@ class YouTubeDownloader:
         
         proxy = self.proxy_manager.get_proxy()
         if proxy:
-            proxy_dict = proxy.to_dict()
-            
-            # Handle SOCKS proxies using requests[socks]
-            if proxy.scheme in ('socks4', 'socks5'):
-                # Convert to proper SOCKS URL format
-                socks_version = 'socks4' if proxy.scheme == 'socks4' else 'socks5'
-                auth = f"{proxy.username}:{proxy.password}@" if proxy.username else ""
-                proxy_url = f"{socks_version}://{auth}{proxy.host}:{proxy.port}"
-                proxy_dict = {
-                    'http': proxy_url,
-                    'https': proxy_url
-                }
-            elif proxy.username and proxy.password:
-                # For authenticated HTTP proxies, set up authentication
-                from requests.auth import HTTPProxyAuth
-                self.session.auth = HTTPProxyAuth(proxy.username, proxy.password)
-            
-            self.session.proxies = proxy_dict
+            self._apply_proxy(proxy)
+    
+    def _apply_proxy(self, proxy: ProxyConfig):
+        """Apply a proxy configuration to the session."""
+        self._active_proxy = proxy
+        proxy_dict = proxy.to_dict()
+        
+        # Handle SOCKS proxies using requests[socks]
+        if proxy.scheme in ('socks4', 'socks5'):
+            # Convert to proper SOCKS URL format
+            socks_version = 'socks4' if proxy.scheme == 'socks4' else 'socks5'
+            auth = (
+                f"{proxy.username}:{proxy.password}@"
+                if (proxy.username and proxy.password)
+                else (f"{proxy.username}@" if proxy.username else "")
+            )
+            proxy_url = f"{socks_version}://{auth}{proxy.host}:{proxy.port}"
+            proxy_dict = {
+                'http': proxy_url,
+                'https': proxy_url
+            }
+        elif proxy.username and proxy.password:
+            # For authenticated HTTP proxies, set up authentication
+            from requests.auth import HTTPProxyAuth
+            self.session.auth = HTTPProxyAuth(proxy.username, proxy.password)
+        
+        self.session.proxies = proxy_dict
     
     def _rotate_proxy(self):
         """Rotate to a new proxy."""
@@ -55,19 +65,7 @@ class YouTubeDownloader:
         
         proxy = self.proxy_manager.get_proxy()
         if proxy:
-            proxy_dict = proxy.to_dict()
-            
-            # Handle SOCKS proxies
-            if proxy.scheme in ('socks4', 'socks5'):
-                socks_version = 'socks4' if proxy.scheme == 'socks4' else 'socks5'
-                auth = f"{proxy.username}:{proxy.password}@" if proxy.username else ""
-                proxy_url = f"{socks_version}://{auth}{proxy.host}:{proxy.port}"
-                proxy_dict = {
-                    'http': proxy_url,
-                    'https': proxy_url
-                }
-            
-            self.session.proxies = proxy_dict
+            self._apply_proxy(proxy)
     
     def _extract_video_id(self, url):
         patterns = [
@@ -99,8 +97,13 @@ class YouTubeDownloader:
         
         for attempt in range(retries):
             try:
-                # Store the proxy used for this request before making it
-                current_proxy = self.proxy_manager.get_proxy() if self.proxy_manager else None
+                # Refresh session proxy if manager rotated by time
+                if self.proxy_manager:
+                    maybe = self.proxy_manager.get_proxy()
+                    if maybe and maybe is not self._active_proxy:
+                        self._apply_proxy(maybe)
+                # Record against the actual active proxy
+                current_proxy = self._active_proxy
                 
                 response = self.session.post(api_url, json=payload, timeout=30)
                 
@@ -195,10 +198,17 @@ class YouTubeDownloader:
         
         # Handle rate limiting during download
         retries = 3
-        current_proxy = self.proxy_manager.get_proxy() if self.proxy_manager else None
         
         for attempt in range(retries):
             try:
+                # Refresh session proxy if manager rotated by time
+                if self.proxy_manager:
+                    maybe = self.proxy_manager.get_proxy()
+                    if maybe and maybe is not self._active_proxy:
+                        self._apply_proxy(maybe)
+                # Record against the actual active proxy
+                current_proxy = self._active_proxy
+                
                 response = self.session.get(selected['url'], headers=headers, stream=True, timeout=60)
                 
                 # Check for rate limiting
@@ -211,7 +221,6 @@ class YouTubeDownloader:
                                 Exception("429 Too Many Requests")
                             )
                         self._rotate_proxy()
-                        current_proxy = self.proxy_manager.get_proxy() if self.proxy_manager else None
                         continue
                     response.raise_for_status()
                 
@@ -228,7 +237,6 @@ class YouTubeDownloader:
                     if current_proxy:
                         self.proxy_manager.record_failure(current_proxy, e)
                     self._rotate_proxy()
-                    current_proxy = self.proxy_manager.get_proxy() if self.proxy_manager else None
                 else:
                     raise
         
