@@ -3,6 +3,7 @@ import json
 import requests
 from typing import Optional, List
 from .proxy_manager import ProxyManager, ProxyConfig
+from tqdm import tqdm
 
 class YouTubeDownloader:
     def __init__(self, url, proxy_manager: Optional[ProxyManager] = None):
@@ -178,43 +179,38 @@ class YouTubeDownloader:
             if not selected:
                 raise Exception(f"Format with itag {itag} not found")
         elif quality:
-            selected = next((f for f in formats if quality in str(f['quality'])), None)
+            selected = next((f for f in formats if f['quality'] == quality and f['has_video'] and f['has_audio']), None)
+            if not selected:
+                selected = next((f for f in formats if quality in str(f['quality'])), None)
             if not selected:
                 raise Exception(f"Quality {quality} not found")
         else:
             with_both = [f for f in formats if f['has_video'] and f['has_audio']]
             selected = with_both[0] if with_both else formats[0]
-        
-        print(f"Downloading: {selected['quality']} - {selected['mime']}")
-        if selected['filesize']:
-            print(f"Size: {int(selected['filesize']) / (1024*1024):.2f} MB")
-        
+
         headers = {
             'User-Agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 11)',
             'Accept': '*/*',
             'Accept-Encoding': 'gzip, deflate',
             'Range': 'bytes=0-'
         }
-        
         # Handle rate limiting during download
         retries = 3
+        response = None
         
         for attempt in range(retries):
             try:
-                # Refresh session proxy if manager rotated by time
                 if self.proxy_manager:
                     maybe = self.proxy_manager.get_proxy()
                     if maybe and maybe is not self._active_proxy:
                         self._apply_proxy(maybe)
-                # Record against the actual active proxy
                 current_proxy = self._active_proxy
                 
                 response = self.session.get(selected['url'], headers=headers, stream=True, timeout=60)
-                
-                # Check for rate limiting
+               
                 if response.status_code == 429:
                     if self.proxy_manager and attempt < retries - 1:
-                        print("\n⚠ Rate limited during download. Rotating proxy...")
+                        print("\nâš  Rate limited during download. Rotating proxy...")
                         if current_proxy:
                             self.proxy_manager.record_failure(
                                 current_proxy,
@@ -233,25 +229,33 @@ class YouTubeDownloader:
                 
             except requests.exceptions.RequestException as e:
                 if self.proxy_manager and attempt < retries - 1:
-                    print("\n⚠ Download failed. Retrying with new proxy...")
+                    print(f"\nâš  Download failed ({e.__class__.__name__}). Retrying with new proxy...")
                     if current_proxy:
                         self.proxy_manager.record_failure(current_proxy, e)
                     self._rotate_proxy()
                 else:
-                    raise
+                    raise 
         
+        if response is None:
+            raise Exception("Failed to get a successful response after all retries.")
+
         total_size = int(response.headers.get('content-length', 0))
-        
-        with open(output_file, 'wb') as f:
-            downloaded = 0
+        if total_size == 0: #
+            total_size = int(selected.get('filesize', 0))
+
+        file_desc = f"{output_file} [{selected.get('quality', 'unknown')}]"
+
+        with open(output_file, 'wb') as f, tqdm(
+            desc=file_desc,
+            total=total_size,
+            unit='B',
+            unit_scale=True,
+            unit_divisor=1024,
+            bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{rate_fmt}, {elapsed}<{remaining}]'
+        ) as bar:
             for chunk in response.iter_content(chunk_size=1024*1024):
                 if chunk:
                     f.write(chunk)
-                    downloaded += len(chunk)
-                    if total_size:
-                        progress = (downloaded / total_size) * 100
-                        print(f"\rProgress: {progress:.1f}% ({downloaded/(1024*1024):.1f}/{total_size/(1024*1024):.1f} MB)", end='', flush=True)
-        
-        print(f"\n✓ Downloaded to {output_file}")
+                    bar.update(len(chunk))
+        print(f"✔ Downloaded to {output_file}")
         return output_file
-
