@@ -1,0 +1,25 @@
+# Example proxy list file
+# One proxy per line
+# Supports HTTP, HTTPS, SOCKS4, and SOCKS5
+# Lines starting with # are ignored
+
+# HTTP proxies
+http://127.0.0.1:8080
+http://proxy.example.com:8080
+
+# HTTPS proxies
+https://proxy.example.com:8443
+
+# SOCKS4 proxies
+socks4://127.0.0.1:1080
+
+# SOCKS5 proxies
+socks5://127.0.0.1:1080
+
+# Proxies with authentication
+http://username:password@proxy.example.com:8080
+socks5://user:pass@proxy.example.com:1080
+
+# IPv6 support
+http://[2001:db8::1]:8080
+
