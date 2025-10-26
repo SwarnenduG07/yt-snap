@@ -27,6 +27,9 @@ class PlaylistDownloader:
         self.url = url
         self.playlist_id = self._extract_playlist_id(url)
         
+        # Network timeout for API requests (seconds)
+        self.request_timeout = 15
+        
         # Create session with proper headers for YouTube API
         self.session = requests.Session()
         self.session.headers.update({
@@ -98,8 +101,14 @@ class PlaylistDownloader:
             "browseId": f"VL{self.playlist_id}"
         }
         
-        response = self.session.post(api_url, json=payload)
-        data = response.json()
+        try:
+            response = self.session.post(api_url, json=payload, timeout=self.request_timeout)
+            response.raise_for_status()
+            data = response.json()
+        except requests.RequestException as e:
+            raise RuntimeError(f"Failed to fetch playlist info: {e}") from e
+        except ValueError as e:
+            raise RuntimeError("Failed to decode playlist info JSON") from e
         
         # Extract playlist metadata
         try:
@@ -190,8 +199,19 @@ class PlaylistDownloader:
                     "continuation": continuation_token
                 }
             
-            response = self.session.post(api_url, json=payload)
-            data = response.json()
+            try:
+                response = self.session.post(api_url, json=payload, timeout=self.request_timeout)
+                response.raise_for_status()
+                data = response.json()
+            except requests.RequestException as e:
+                # Stop on network failure; return what we have
+                with print_lock:
+                    print(f"❌ Playlist fetch error: {e}")
+                break
+            except ValueError:
+                with print_lock:
+                    print("❌ Invalid JSON in playlist response")
+                break
             
             # Extract video items
             try:
@@ -227,22 +247,16 @@ class PlaylistDownloader:
                                 'url': f"https://www.youtube.com/watch?v={video_id}"
                             })
                     
-                    elif 'continuationItemRenderer' in item:
-                        continuation_token = item['continuationItemRenderer']['continuationEndpoint']['continuationCommand']['token']
                 
-                # Check if there's more content
-                if not continuation_token or continuation_token in [item.get('continuationItemRenderer', {}).get('continuationEndpoint', {}).get('continuationCommand', {}).get('token') for item in items]:
-                    # Find new continuation token
-                    found_new = False
-                    for item in items:
-                        if 'continuationItemRenderer' in item:
-                            new_token = item['continuationItemRenderer']['continuationEndpoint']['continuationCommand']['token']
-                            if new_token != continuation_token:
-                                continuation_token = new_token
-                                found_new = True
-                                break
-                    if not found_new:
+                # Find continuation token for next page; if none, we're done
+                next_token = None
+                for item in items:
+                    if 'continuationItemRenderer' in item:
+                        next_token = item['continuationItemRenderer']['continuationEndpoint']['continuationCommand']['token']
                         break
+                
+                if next_token:
+                    continuation_token = next_token
                 else:
                     break
                     
@@ -318,6 +332,12 @@ class PlaylistDownloader:
         Returns:
             Dictionary with 'completed' and 'failed' lists of video IDs
         """
+        # Validate max_workers
+        if max_workers < 1:
+            raise ValueError("max_workers must be >= 1")
+        if max_workers > 10:
+            raise ValueError("max_workers must be <= 10 (recommended 1-5 for stability)")
+        
         # Create output directory
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -401,31 +421,32 @@ class PlaylistDownloader:
         # Download videos with thread pool
         start_time = time.time()
         interrupted = False
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        futures = {}
         
         try:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Submit all download tasks
-                futures = {
-                    executor.submit(download_video, i, video): video 
-                    for i, video in enumerate(videos)
-                    if video['video_id'] not in completed
-                }
+            # Submit all download tasks
+            futures = {
+                executor.submit(download_video, i, video): video 
+                for i, video in enumerate(videos)
+                if video['video_id'] not in completed
+            }
+            
+            # Process completed downloads
+            for future in as_completed(futures):
+                success, video_id, result = future.result()
                 
-                # Process completed downloads
-                for future in as_completed(futures):
-                    success, video_id, result = future.result()
-                    
-                    if success:
-                        completed.add(video_id)
-                    else:
-                        failed.append(video_id)
-                    
-                    # Save state after each video
-                    state = {
-                        'completed': list(completed),
-                        'failed': failed
-                    }
-                    self._save_download_state(state_file, state)
+                if success:
+                    completed.add(video_id)
+                else:
+                    failed.append(video_id)
+                
+                # Save state after each video
+                state = {
+                    'completed': list(completed),
+                    'failed': failed
+                }
+                self._save_download_state(state_file, state)
         
         except KeyboardInterrupt:
             interrupted = True
@@ -439,6 +460,10 @@ class PlaylistDownloader:
             }
             self._save_download_state(state_file, state)
             
+            # Cancel remaining futures gracefully
+            for future in futures:
+                future.cancel()
+            
             # Show quick summary
             elapsed = time.time() - start_time
             print(f"{'='*60}")
@@ -449,10 +474,10 @@ class PlaylistDownloader:
             print(f"{'='*60}\n")
             print("💡 To resume, run the same command again.")
             print(f"   State saved in: {state_file}\n")
-            
-            # Force exit to avoid thread cleanup errors
-            # This prevents the ThreadPoolExecutor from trying to join threads
-            os._exit(0)
+        
+        finally:
+            # Shutdown executor gracefully without waiting for cancelled futures
+            executor.shutdown(wait=False, cancel_futures=True)
         
         # Summary
         elapsed = time.time() - start_time

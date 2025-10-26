@@ -107,7 +107,7 @@ print(f"Author: {metadata['author']}")
 # Get list of all videos
 videos = playlist.get_video_list()
 for i, video in enumerate(videos[:5], 1):
-    print(f"{i}. {video['title']} (ID: {video['id']})")
+    print(f"{i}. {video['title']} (ID: {video['video_id']})")
 
 # Download entire playlist with default settings
 result = playlist.download()

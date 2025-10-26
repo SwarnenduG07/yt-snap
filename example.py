@@ -86,7 +86,7 @@ print("Videos in playlist:")
 videos = playlist.get_video_list()
 for i, video in enumerate(videos[:10], 1):  # Show first 10
     print(f"  {i:2d}. {video['title']}")
-    print(f"      ID: {video['id']}")
+    print(f"      ID: {video['video_id']}")
 
 if len(videos) > 10:
     print(f"  ... and {len(videos) - 10} more videos")

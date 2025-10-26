@@ -215,7 +215,8 @@ print_test "14. Test thread safety implementation"
 python3 -c "
 from youtube_downloader.playlist import print_lock
 import threading
-assert isinstance(print_lock, threading.Lock), 'print_lock should be a Lock'
+LockType = type(threading.Lock())
+assert isinstance(print_lock, LockType), 'print_lock should be a Lock'
 print('Thread safety lock exists')
 " && print_success "Thread safety implemented" || print_error "Thread safety not implemented"
 

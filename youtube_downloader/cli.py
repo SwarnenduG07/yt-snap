@@ -38,10 +38,21 @@ def main():
                     quality = sys.argv[i + 1]
                     i += 2
                 elif sys.argv[i] == '--itag' and i + 1 < len(sys.argv):
-                    itag = int(sys.argv[i + 1])
+                    try:
+                        itag = int(sys.argv[i + 1])
+                    except ValueError:
+                        print("Error: --itag must be an integer")
+                        sys.exit(1)
                     i += 2
                 elif sys.argv[i] == '--concurrency' and i + 1 < len(sys.argv):
-                    concurrency = int(sys.argv[i + 1])
+                    try:
+                        concurrency = int(sys.argv[i + 1])
+                        if concurrency < 1 or concurrency > 10:
+                            print("Error: --concurrency must be between 1 and 10")
+                            sys.exit(1)
+                    except ValueError:
+                        print("Error: --concurrency must be an integer")
+                        sys.exit(1)
                     i += 2
                 elif sys.argv[i] == '--no-resume':
                     resume = False
