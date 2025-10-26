@@ -73,7 +73,7 @@ class YouTubeDownloader:
         
         return video_formats
     
-    def download(self, output_file='video.mp4', itag=None, quality=None):
+    def download(self, output_file='video.mp4', itag=None, quality=None, quiet=False):
         formats = self.get_formats()
         
         if not formats:
@@ -91,9 +91,10 @@ class YouTubeDownloader:
             with_both = [f for f in formats if f['has_video'] and f['has_audio']]
             selected = with_both[0] if with_both else formats[0]
         
-        print(f"Downloading: {selected['quality']} - {selected['mime']}")
-        if selected['filesize']:
-            print(f"Size: {int(selected['filesize']) / (1024*1024):.2f} MB")
+        if not quiet:
+            print(f"Downloading: {selected['quality']} - {selected['mime']}")
+            if selected['filesize']:
+                print(f"Size: {int(selected['filesize']) / (1024*1024):.2f} MB")
         
         headers = {
             'User-Agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 11)',
@@ -113,10 +114,12 @@ class YouTubeDownloader:
                 if chunk:
                     f.write(chunk)
                     downloaded += len(chunk)
-                    if total_size:
+                    # Only show progress if not quiet mode
+                    if total_size and not quiet:
                         progress = (downloaded / total_size) * 100
                         print(f"\rProgress: {progress:.1f}% ({downloaded/(1024*1024):.1f}/{total_size/(1024*1024):.1f} MB)", end='', flush=True)
         
-        print(f"\n✓ Downloaded to {output_file}")
+        if not quiet:
+            print(f"\n✓ Downloaded to {output_file}")
         return output_file
 
