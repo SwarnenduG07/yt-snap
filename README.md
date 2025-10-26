@@ -50,12 +50,21 @@ ytsnap "https://www.youtube.com/watch?v=VIDEO_ID" video.mp4 --quality 720p
 
 # Download by itag
 ytsnap "https://www.youtube.com/watch?v=VIDEO_ID" video.mp4 --itag 18
+
+# Use proxies from file (bypass rate limits)
+ytsnap "https://www.youtube.com/watch?v=VIDEO_ID" video.mp4 --proxy-file proxies.txt
+
+# Use single proxy
+ytsnap "https://www.youtube.com/watch?v=VIDEO_ID" video.mp4 --proxy "http://127.0.0.1:8080"
+
+# Use authenticated proxy
+ytsnap "https://www.youtube.com/watch?v=VIDEO_ID" video.mp4 --proxy "http://user:pass@proxy.com:8080"
 ```
 
 ## Library Usage
 
 ```python
-from youtube_downloader import YouTubeDownloader
+from youtube_downloader import YouTubeDownloader, ProxyManager, ProxyConfig
 
 # Initialize downloader
 downloader = YouTubeDownloader("https://www.youtube.com/watch?v=VIDEO_ID")
@@ -73,6 +82,17 @@ downloader.download("video_720p.mp4", quality="720p")
 
 # Download by itag
 downloader.download("video.mp4", itag=18)
+
+# Use proxy manager to bypass rate limits
+proxy_manager = ProxyManager.from_file("proxies.txt")
+downloader = YouTubeDownloader("https://www.youtube.com/watch?v=VIDEO_ID", proxy_manager=proxy_manager)
+downloader.download("video_with_proxy.mp4")
+
+# Use single proxy
+proxy_config = ProxyConfig(host="127.0.0.1", port=8080, scheme="http")
+proxy_manager = ProxyManager(proxies=[proxy_config])
+downloader = YouTubeDownloader("https://www.youtube.com/watch?v=VIDEO_ID", proxy_manager=proxy_manager)
+downloader.download("video.mp4")
 ```
 
 ## Features
@@ -84,6 +104,79 @@ downloader.download("video.mp4", itag=18)
 - ✅ Both CLI and library usage
 - ✅ Video and audio formats
 - ✅ Fast and lightweight
+- ✅ **Proxy support** (HTTP, HTTPS, SOCKS4, SOCKS5)
+- ✅ **Proxy rotation** to bypass rate limits
+- ✅ **Automatic failover** and health checking
+- ✅ **Proxy authentication** support
+
+## Proxy Support
+
+ytsnap includes robust proxy support to bypass rate limiting and distribute requests across multiple IPs.
+
+### Proxy Types Supported
+- **HTTP/HTTPS** proxies
+- **SOCKS4/SOCKS4A** proxies
+- **SOCKS5** proxies
+- **Authenticated** proxies (username:password)
+
+### Features
+- ✅ Automatic proxy rotation
+- ✅ Health checking and failure tracking
+- ✅ Automatic failover on rate limits (429 errors)
+- ✅ Support for proxy lists from files
+- ✅ Time-based and round-robin rotation
+
+### Creating a Proxy File
+
+Create a file (e.g., `proxies.txt`) with one proxy per line:
+
+```
+http://127.0.0.1:8080
+https://proxy.example.com:8443
+socks5://127.0.0.1:1080
+http://username:password@proxy.example.com:8080
+```
+
+### CLI Usage with Proxies
+
+```bash
+# Use proxy file
+ytsnap "https://www.youtube.com/watch?v=VIDEO_ID" output.mp4 --proxy-file proxies.txt
+
+# Use single proxy
+ytsnap "https://www.youtube.com/watch?v=VIDEO_ID" output.mp4 --proxy "http://127.0.0.1:8080"
+
+# Use SOCKS5 proxy
+ytsnap "https://www.youtube.com/watch?v=VIDEO_ID" output.mp4 --proxy "socks5://127.0.0.1:1080"
+
+# Disable health checking
+ytsnap "https://www.youtube.com/watch?v=VIDEO_ID" output.mp4 --proxy-file proxies.txt --no-health-check
+```
+
+### Library Usage with Proxies
+
+```python
+from youtube_downloader import YouTubeDownloader, ProxyManager, ProxyConfig
+
+# Load proxies from file
+proxy_manager = ProxyManager.from_file("proxies.txt")
+
+# Initialize downloader with proxy manager
+downloader = YouTubeDownloader(url, proxy_manager=proxy_manager)
+downloader.download("video.mp4")
+
+# Create custom proxy configuration
+proxy_config = ProxyConfig(
+    host="127.0.0.1",
+    port=8080,
+    scheme="http",
+    username="user",  # optional
+    password="pass"   # optional
+)
+proxy_manager = ProxyManager(proxies=[proxy_config])
+downloader = YouTubeDownloader(url, proxy_manager=proxy_manager)
+downloader.download("video.mp4")
+```
 
 ## How it works
 
