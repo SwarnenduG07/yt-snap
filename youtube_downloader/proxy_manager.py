@@ -7,11 +7,12 @@ Supports HTTP, HTTPS, SOCKS4, and SOCKS5 proxies.
 
 import time
 import random
-from typing import Optional, List, Dict, Tuple
+import logging
+from typing import Optional, List, Dict
 from dataclasses import dataclass
-from requests.adapters import HTTPAdapter
-from requests.auth import HTTPProxyAuth
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -32,7 +33,12 @@ class ProxyConfig:
     
     def to_dict(self) -> Dict[str, str]:
         """Convert to proxy dict for requests library."""
-        auth_part = f"{self.username}:{self.password}@" if self.username else ""
+        if self.username and self.password:
+            auth_part = f"{self.username}:{self.password}@"
+        elif self.username:
+            auth_part = f"{self.username}@"
+        else:
+            auth_part = ""
         url = f"{self.scheme}://{auth_part}{self.host}:{self.port}"
         return {
             'http': url,
@@ -140,13 +146,13 @@ class ProxyManager:
         if '@' in line:
             auth_part, url_part = line.rsplit('@', 1)
             if '://' in auth_part:
-                scheme = auth_part.split('://')[0]
-                auth_info = ''
+                scheme, auth_info = auth_part.split('://', 1)
             else:
-                auth_info = auth_part
                 scheme = 'http'
+                auth_info = auth_part
                 if '://' in url_part:
                     scheme = url_part.split('://')[0]
+                    url_part = url_part.split('://', 1)[1]
             username, password = auth_info.split(':') if ':' in auth_info else (auth_info, None)
         else:
             username, password = None, None
@@ -237,7 +243,7 @@ class ProxyManager:
         proxy.failure_count = 0
         proxy.is_healthy = True
     
-    def record_failure(self, proxy: ProxyConfig, error: Exception = None):
+    def record_failure(self, proxy: ProxyConfig, error: Optional[Exception] = None):
         """
         Record a failed request and check if proxy should be marked unhealthy.
         
@@ -252,11 +258,11 @@ class ProxyManager:
             if hasattr(error, 'response') and error.response is not None:
                 status_code = error.response.status_code
                 if status_code == 429:
-                    print(f"⚠ Proxy {proxy.host}:{proxy.port} rate limited (429)")
+                    logger.warning(f"Proxy {proxy.host}:{proxy.port} rate limited (429)")
                 else:
-                    print(f"⚠ Proxy {proxy.host}:{proxy.port} marked unhealthy after {proxy.failure_count} failures")
+                    logger.warning(f"Proxy {proxy.host}:{proxy.port} marked unhealthy after {proxy.failure_count} failures")
             else:
-                print(f"⚠ Proxy {proxy.host}:{proxy.port} marked unhealthy after {proxy.failure_count} failures")
+                logger.warning(f"Proxy {proxy.host}:{proxy.port} marked unhealthy after {proxy.failure_count} failures")
     
     def _health_check(self, proxy: ProxyConfig) -> bool:
         """
@@ -273,13 +279,13 @@ class ProxyManager:
             
             # Handle SOCKS proxies
             if proxy.scheme in ('socks4', 'socks5'):
-                import requests
                 from urllib.parse import urlparse
                 
                 socks_version = 'socks4' if proxy.scheme == 'socks4' else 'socks5'
+                auth_part = f'{proxy.username}:{proxy.password}@' if proxy.username and proxy.password else (f'{proxy.username}@' if proxy.username else '')
                 proxies = {
-                    'http': f'{socks_version}://{proxy.host}:{proxy.port}',
-                    'https': f'{socks_version}://{proxy.host}:{proxy.port}'
+                    'http': f'{socks_version}://{auth_part}{proxy.host}:{proxy.port}',
+                    'https': f'{socks_version}://{auth_part}{proxy.host}:{proxy.port}'
                 }
             
             response = requests.get(
@@ -300,11 +306,11 @@ class ProxyManager:
         if not self.enable_health_check:
             return
         
-        print("🔍 Checking proxy health...")
+        logger.info("Checking proxy health...")
         for proxy in self.proxies:
             is_healthy = self._health_check(proxy)
             status = "✓" if is_healthy else "✗"
-            print(f"{status} {proxy}")
+            logger.info(f"{status} {proxy}")
     
     def add_proxy(self, config: ProxyConfig):
         """Add a new proxy to the pool."""

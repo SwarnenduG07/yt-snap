@@ -99,13 +99,15 @@ class YouTubeDownloader:
         
         for attempt in range(retries):
             try:
+                # Store the proxy used for this request before making it
+                current_proxy = self.proxy_manager.get_proxy() if self.proxy_manager else None
+                
                 response = self.session.post(api_url, json=payload, timeout=30)
                 
                 # Handle rate limiting
                 if response.status_code == 429:
                     if self.proxy_manager:
-                        print(f"⚠ Rate limited (429). Rotating proxy...")
-                        current_proxy = self.proxy_manager.get_proxy()
+                        print("⚠ Rate limited (429). Rotating proxy...")
                         if current_proxy:
                             self.proxy_manager.record_failure(
                                 current_proxy,
@@ -119,19 +121,16 @@ class YouTubeDownloader:
                 response.raise_for_status()
                 
                 # Record success if using proxies
-                if self.proxy_manager:
-                    self.proxy_manager.record_success(self.proxy_manager.get_proxy())
+                if self.proxy_manager and current_proxy:
+                    self.proxy_manager.record_success(current_proxy)
                 
                 return response.json()
                 
             except requests.exceptions.RequestException as e:
                 if self.proxy_manager and attempt < retries - 1:
                     print(f"⚠ Request failed. Rotating proxy... ({attempt + 1}/{retries})")
-                    if hasattr(e, 'response') and e.response:
-                        self.proxy_manager.record_failure(
-                            self.proxy_manager.get_proxy(),
-                            e
-                        )
+                    if current_proxy:
+                        self.proxy_manager.record_failure(current_proxy, e)
                     self._rotate_proxy()
                 else:
                     raise
@@ -196,6 +195,8 @@ class YouTubeDownloader:
         
         # Handle rate limiting during download
         retries = 3
+        current_proxy = self.proxy_manager.get_proxy() if self.proxy_manager else None
+        
         for attempt in range(retries):
             try:
                 response = self.session.get(selected['url'], headers=headers, stream=True, timeout=60)
@@ -203,28 +204,31 @@ class YouTubeDownloader:
                 # Check for rate limiting
                 if response.status_code == 429:
                     if self.proxy_manager and attempt < retries - 1:
-                        print(f"\n⚠ Rate limited during download. Rotating proxy...")
-                        current_proxy = self.proxy_manager.get_proxy()
+                        print("\n⚠ Rate limited during download. Rotating proxy...")
                         if current_proxy:
                             self.proxy_manager.record_failure(
                                 current_proxy,
                                 Exception("429 Too Many Requests")
                             )
                         self._rotate_proxy()
+                        current_proxy = self.proxy_manager.get_proxy() if self.proxy_manager else None
                         continue
                     response.raise_for_status()
                 
                 response.raise_for_status()
                 
-                if self.proxy_manager:
-                    self.proxy_manager.record_success(self.proxy_manager.get_proxy())
+                if self.proxy_manager and current_proxy:
+                    self.proxy_manager.record_success(current_proxy)
                 
                 break
                 
             except requests.exceptions.RequestException as e:
                 if self.proxy_manager and attempt < retries - 1:
-                    print(f"\n⚠ Download failed. Retrying with new proxy...")
+                    print("\n⚠ Download failed. Retrying with new proxy...")
+                    if current_proxy:
+                        self.proxy_manager.record_failure(current_proxy, e)
                     self._rotate_proxy()
+                    current_proxy = self.proxy_manager.get_proxy() if self.proxy_manager else None
                 else:
                     raise
         

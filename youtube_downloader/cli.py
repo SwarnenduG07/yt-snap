@@ -12,7 +12,6 @@ def print_usage():
     print("  --itag <itag>          Select format by itag number")
     print("  --proxy-file <file>    Load proxies from file")
     print("  --proxy <proxy_url>    Use single proxy (e.g., http://host:port)")
-    print("  --proxy-type <type>    Proxy rotation type: round-robin (default) or random")
     print("  --no-health-check      Disable proxy health checking")
     print("\nProxy file format:")
     print("  http://host:port")
@@ -43,7 +42,6 @@ def main():
     proxy_manager = None
     proxy_file = None
     proxy_url = None
-    proxy_type = "round-robin"
     enable_health_check = True
     
     # Parse arguments
@@ -60,9 +58,6 @@ def main():
             i += 2
         elif sys.argv[i] == '--proxy' and i + 1 < len(sys.argv):
             proxy_url = sys.argv[i + 1]
-            i += 2
-        elif sys.argv[i] == '--proxy-type' and i + 1 < len(sys.argv):
-            proxy_type = sys.argv[i + 1]
             i += 2
         elif sys.argv[i] == '--no-health-check':
             enable_health_check = False
