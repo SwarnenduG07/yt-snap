@@ -8,6 +8,7 @@ Supports HTTP, HTTPS, SOCKS4, and SOCKS5 proxies.
 import time
 import random
 import logging
+import threading
 from typing import Optional, List, Dict
 from dataclasses import dataclass
 import requests
@@ -87,6 +88,7 @@ class ProxyManager:
         
         self.current_proxy_index = 0
         self.start_time = time.time()
+        self._lock = threading.RLock()  # Thread safety lock
         
         if self.enable_health_check and self.proxies:
             self._health_check_all()
@@ -199,34 +201,35 @@ class ProxyManager:
         Returns:
             ProxyConfig or None if no healthy proxies available
         """
-        if not self.proxies:
-            return None
-        
-        # Get healthy proxies
-        healthy_proxies = [p for p in self.proxies if p.is_healthy]
-        if not healthy_proxies:
-            # Reset all proxies and try again
-            for proxy in self.proxies:
-                proxy.is_healthy = True
-                proxy.failure_count = 0
-            healthy_proxies = self.proxies
-        
-        if not healthy_proxies:
-            return None
-        
-        # Check if we need to rotate (time-based or round-robin)
-        current_time = time.time()
-        time_since_start = current_time - self.start_time
-        
-        if time_since_start >= self.rotation_interval:
-            self.current_proxy_index = (self.current_proxy_index + 1) % len(healthy_proxies)
-            self.start_time = current_time
-        
-        # Get the selected proxy
-        selected = healthy_proxies[self.current_proxy_index % len(healthy_proxies)]
-        selected.last_used = current_time
-        
-        return selected
+        with self._lock:
+            if not self.proxies:
+                return None
+            
+            # Get healthy proxies
+            healthy_proxies = [p for p in self.proxies if p.is_healthy]
+            if not healthy_proxies:
+                # Reset all proxies and try again
+                for proxy in self.proxies:
+                    proxy.is_healthy = True
+                    proxy.failure_count = 0
+                healthy_proxies = self.proxies
+            
+            if not healthy_proxies:
+                return None
+            
+            # Check if we need to rotate (time-based or round-robin)
+            current_time = time.time()
+            time_since_start = current_time - self.start_time
+            
+            if time_since_start >= self.rotation_interval:
+                self.current_proxy_index = (self.current_proxy_index + 1) % len(healthy_proxies)
+                self.start_time = current_time
+            
+            # Get the selected proxy
+            selected = healthy_proxies[self.current_proxy_index % len(healthy_proxies)]
+            selected.last_used = current_time
+            
+            return selected
     
     def get_random_proxy(self) -> Optional[ProxyConfig]:
         """Get a random healthy proxy."""
@@ -247,8 +250,9 @@ class ProxyManager:
     
     def record_success(self, proxy: ProxyConfig):
         """Record a successful request using this proxy."""
-        proxy.failure_count = 0
-        proxy.is_healthy = True
+        with self._lock:
+            proxy.failure_count = 0
+            proxy.is_healthy = True
     
     def record_failure(self, proxy: ProxyConfig, error: Optional[Exception] = None):
         """
@@ -258,18 +262,19 @@ class ProxyManager:
             proxy: The proxy that failed
             error: The exception that occurred
         """
-        proxy.failure_count += 1
-        
-        if proxy.failure_count >= self.max_failures:
-            proxy.is_healthy = False
-            if hasattr(error, 'response') and error.response is not None:
-                status_code = error.response.status_code
-                if status_code == 429:
-                    logger.warning(f"Proxy {proxy.host}:{proxy.port} rate limited (429)")
+        with self._lock:
+            proxy.failure_count += 1
+            
+            if proxy.failure_count >= self.max_failures:
+                proxy.is_healthy = False
+                if hasattr(error, 'response') and error.response is not None:
+                    status_code = error.response.status_code
+                    if status_code == 429:
+                        logger.warning(f"Proxy {proxy.host}:{proxy.port} rate limited (429)")
+                    else:
+                        logger.warning(f"Proxy {proxy.host}:{proxy.port} marked unhealthy after {proxy.failure_count} failures")
                 else:
                     logger.warning(f"Proxy {proxy.host}:{proxy.port} marked unhealthy after {proxy.failure_count} failures")
-            else:
-                logger.warning(f"Proxy {proxy.host}:{proxy.port} marked unhealthy after {proxy.failure_count} failures")
     
     def _health_check(self, proxy: ProxyConfig) -> bool:
         """
@@ -321,19 +326,21 @@ class ProxyManager:
     
     def add_proxy(self, config: ProxyConfig):
         """Add a new proxy to the pool."""
-        self.proxies.append(config)
+        with self._lock:
+            self.proxies.append(config)
         if self.enable_health_check:
             self._health_check(config)
     
     def get_stats(self) -> Dict:
         """Get statistics about the proxy pool."""
-        total = len(self.proxies)
-        healthy = sum(1 for p in self.proxies if p.is_healthy)
-        
-        return {
-            'total': total,
-            'healthy': healthy,
-            'unhealthy': total - healthy,
-            'healthy_ratio': healthy / total if total > 0 else 0
-        }
+        with self._lock:
+            total = len(self.proxies)
+            healthy = sum(1 for p in self.proxies if p.is_healthy)
+            
+            return {
+                'total': total,
+                'healthy': healthy,
+                'unhealthy': total - healthy,
+                'healthy_ratio': healthy / total if total > 0 else 0
+            }
 

@@ -1,7 +1,9 @@
 import re
 import json
+import os
 import requests
-from typing import Optional, List
+from typing import Optional, List, Dict, Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .proxy_manager import ProxyManager, ProxyConfig
 from tqdm import tqdm
 
@@ -259,3 +261,304 @@ class YouTubeDownloader:
                     bar.update(len(chunk))
         print(f"✔ Downloaded to {output_file}")
         return output_file
+
+
+class PlaylistDownloader:
+    def __init__(self, playlist_url: str, proxy_manager: Optional[ProxyManager] = None, concurrency: int = 3):
+        """
+        Initialize PlaylistDownloader.
+        
+        Args:
+            playlist_url: URL of the YouTube playlist
+            proxy_manager: Optional ProxyManager for proxy support
+            concurrency: Number of parallel downloads (default: 3)
+        """
+        self.playlist_url = playlist_url
+        self.playlist_id = self._extract_playlist_id(playlist_url)
+        self.proxy_manager = proxy_manager
+        self.concurrency = concurrency
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Origin': 'https://www.youtube.com',
+            'Referer': 'https://www.youtube.com/'
+        })
+        
+        # Configure proxy for session if proxy manager is provided
+        if self.proxy_manager:
+            self._setup_proxy()
+        
+        self.videos = []
+        
+    def _setup_proxy(self):
+        """Setup proxy for the session."""
+        if not self.proxy_manager:
+            return
+        
+        proxy = self.proxy_manager.get_proxy()
+        if proxy:
+            self._apply_proxy(proxy)
+    
+    def _apply_proxy(self, proxy: ProxyConfig):
+        """Apply a proxy configuration to the session."""
+        proxy_dict = proxy.to_dict()
+        
+        # Handle SOCKS proxies using requests[socks]
+        if proxy.scheme in ('socks4', 'socks5'):
+            socks_version = 'socks4' if proxy.scheme == 'socks4' else 'socks5'
+            auth = (
+                f"{proxy.username}:{proxy.password}@"
+                if (proxy.username and proxy.password)
+                else (f"{proxy.username}@" if proxy.username else "")
+            )
+            proxy_url = f"{socks_version}://{auth}{proxy.host}:{proxy.port}"
+            proxy_dict = {
+                'http': proxy_url,
+                'https': proxy_url
+            }
+        elif proxy.username and proxy.password:
+            from requests.auth import HTTPProxyAuth
+            self.session.auth = HTTPProxyAuth(proxy.username, proxy.password)
+        
+        self.session.proxies = proxy_dict
+    
+    def _extract_playlist_id(self, url: str) -> str:
+        """Extract playlist ID from URL."""
+        patterns = [
+            r'list=([a-zA-Z0-9_-]+)',
+            r'/playlist\?list=([a-zA-Z0-9_-]+)',
+            r'^([a-zA-Z0-9_-]+)$'  # Direct ID
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+        
+        raise ValueError("Invalid YouTube playlist URL")
+    
+    def _get_playlist_info(self) -> Dict:
+        """Fetch playlist metadata from YouTube API."""
+        api_url = "https://www.youtube.com/youtubei/v1/browse"
+        
+        payload = {
+            "context": {
+                "client": {
+                    "clientName": "ANDROID",
+                    "clientVersion": "19.09.37",
+                    "androidSdkVersion": 30,
+                    "hl": "en",
+                    "gl": "US"
+                }
+            },
+            "browseId": f"VL{self.playlist_id}"
+        }
+        
+        try:
+            response = self.session.post(api_url, json=payload, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            # Try alternative endpoint
+            return self._get_playlist_info_alternative()
+    
+    def _get_playlist_info_alternative(self) -> Dict:
+        """Alternative method to get playlist info."""
+        api_url = "https://www.youtube.com/youtubei/v1/browse"
+        
+        # Try with different browseId format
+        payload = {
+            "context": {
+                "client": {
+                    "clientName": "WEB",
+                    "clientVersion": "2.0",
+                    "hl": "en",
+                    "gl": "US"
+                }
+            },
+            "browseId": f"VL{self.playlist_id}"
+        }
+        
+        try:
+            response = self.session.post(api_url, json=payload, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            raise Exception(f"Failed to fetch playlist info: {e}")
+    
+    def _extract_videos_from_playlist_info(self, data: Dict) -> List[Dict]:
+        """Extract video list from playlist response."""
+        videos = []
+        
+        # Navigate through the response structure
+        contents = data.get('contents', {})
+        two_column_browser_renderer = contents.get('twoColumnBrowseResultsRenderer', {})
+        tabs = two_column_browser_renderer.get('tabs', [])
+        
+        for tab in tabs:
+            tab_renderer = tab.get('tabRenderer', {})
+            content = tab_renderer.get('content', {})
+            section_list_renderer = content.get('sectionListRenderer', {})
+            items = section_list_renderer.get('contents', [])
+            
+            for item in items:
+                item_section = item.get('itemSectionRenderer', {})
+                playlist_video_list = item_section.get('contents', [])
+                
+                for playlist_video in playlist_video_list:
+                    renderer = playlist_video.get('playlistVideoRenderer')
+                    if renderer:
+                        video_id = renderer.get('videoId')
+                        title = renderer.get('title', {}).get('runs', [{}])[0].get('text', 'Unknown')
+                        
+                        if video_id:
+                            videos.append({
+                                'video_id': video_id,
+                                'title': title,
+                                'url': f"https://www.youtube.com/watch?v={video_id}"
+                            })
+        
+        return videos
+    
+    def get_videos(self) -> List[Dict]:
+        """
+        Fetch all videos from the playlist.
+        
+        Returns:
+            List of video dictionaries with video_id, title, and url
+        """
+        if self.videos:
+            return self.videos
+        
+        print(f"Fetching playlist information...")
+        data = self._get_playlist_info()
+        self.videos = self._extract_videos_from_playlist_info(data)
+        
+        if not self.videos:
+            raise Exception("No videos found in playlist or playlist is private/unavailable")
+        
+        print(f"Found {len(self.videos)} videos in playlist")
+        return self.videos
+    
+    def download(self, output_dir: str = "./downloads", quality: Optional[str] = None, itag: Optional[int] = None, 
+                 on_video_start: Optional[Callable] = None, on_video_complete: Optional[Callable] = None,
+                 on_error: Optional[Callable] = None):
+        """
+        Download all videos from the playlist.
+        
+        Args:
+            output_dir: Directory to save downloaded videos
+            quality: Quality preference (e.g., '720p')
+            itag: Specific itag to use
+            on_video_start: Optional callback when video download starts
+            on_video_complete: Optional callback when video download completes
+            on_error: Optional callback when video download fails
+            
+        Returns:
+            Dict with download statistics
+        """
+        import os
+        
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Get playlist videos
+        videos = self.get_videos()
+        
+        if not videos:
+            print("No videos to download")
+            return {
+                'total': 0,
+                'successful': 0,
+                'failed': 0,
+                'failed_videos': []
+            }
+        
+        # Download statistics
+        stats = {
+            'total': len(videos),
+            'successful': 0,
+            'failed': 0,
+            'failed_videos': []
+        }
+        
+        # Download videos in parallel
+        print(f"\nDownloading {len(videos)} videos with concurrency={self.concurrency}...\n")
+        
+        with ThreadPoolExecutor(max_workers=self.concurrency) as executor:
+            # Submit all download tasks
+            future_to_video = {
+                executor.submit(self._download_single_video, video, output_dir, quality, itag, 
+                               on_video_start, on_video_complete): video
+                for video in videos
+            }
+            
+            # Create overall progress bar
+            with tqdm(total=len(videos), desc="Overall Progress", unit="video") as overall_bar:
+                # Process completed downloads
+                for future in as_completed(future_to_video):
+                    video = future_to_video[future]
+                    try:
+                        result = future.result()
+                        if result:
+                            stats['successful'] += 1
+                        else:
+                            stats['failed'] += 1
+                            stats['failed_videos'].append(video)
+                            if on_error:
+                                on_error(video, None)
+                    except Exception as e:
+                        stats['failed'] += 1
+                        stats['failed_videos'].append(video)
+                        if on_error:
+                            on_error(video, e)
+                    
+                    overall_bar.update(1)
+        
+        # Print summary
+        print(f"\n{'='*60}")
+        print(f"Download Summary:")
+        print(f"  Total videos: {stats['total']}")
+        print(f"  Successful: {stats['successful']}")
+        print(f"  Failed: {stats['failed']}")
+        print(f"  Saved to: {output_dir}")
+        if stats['failed_videos']:
+            print(f"\n  Failed videos:")
+            for video in stats['failed_videos']:
+                print(f"    - {video.get('title', 'Unknown')}")
+        print(f"{'='*60}\n")
+        
+        return stats
+    
+    def _download_single_video(self, video: Dict, output_dir: str, quality: Optional[str], 
+                               itag: Optional[int], on_video_start: Optional[Callable],
+                               on_video_complete: Optional[Callable]) -> bool:
+        """Download a single video from the playlist."""
+        if on_video_start:
+            on_video_start(video)
+        
+        # Create downloader for this video
+        downloader = YouTubeDownloader(video['url'], proxy_manager=self.proxy_manager)
+        
+        # Generate safe filename from title with video_id to prevent collisions
+        safe_title = "".join(c for c in video.get('title', 'video') if c.isalnum() or c in (' ', '-', '_')).strip()
+        safe_title = safe_title.replace(' ', '_')[:80]  # Leave room for video_id
+        video_id = video.get('video_id', 'unknown')
+        output_file = os.path.join(output_dir, f"{safe_title}_{video_id}.mp4")
+        
+        # Skip if file already exists (resume support)
+        if os.path.exists(output_file):
+            print(f"✓ Skipping {video.get('title', 'video')} (already exists)")
+            if on_video_complete:
+                on_video_complete(video, output_file)
+            return True
+        
+        # Download the video
+        downloader.download(output_file, quality=quality, itag=itag)
+        
+        if on_video_complete:
+            on_video_complete(video, output_file)
+        
+        return True
