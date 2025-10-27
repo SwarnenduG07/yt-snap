@@ -25,7 +25,7 @@ class TestPlaylistDownloader(unittest.TestCase):
             PlaylistDownloader("https://www.youtube.com/watch?v=VIDEO_ID")
         
         with self.assertRaises(ValueError):
-            PlaylistDownloader("not_a_playlist_url")
+            PlaylistDownloader("https://invalid.com/not@valid!")
     
     def test_concurrency_config(self):
         """Test that concurrency is properly configured"""
@@ -62,15 +62,15 @@ class TestPlaylistDownloader(unittest.TestCase):
         
         with patch.object(downloader, 'get_videos', return_value=mock_videos):
             with patch.object(downloader, '_download_single_video', return_value=True):
-                with patch('os.makedirs'):
-                    with patch('os.path.exists', return_value=False):
-                        import os
-                        os.path.join = lambda *args: '/'.join(args)
-                        stats = downloader.download(output_dir="./test")
-                        
-                        self.assertEqual(stats['total'], 2)
-                        self.assertEqual(stats['successful'], 2)
-                        self.assertEqual(stats['failed'], 0)
+                with patch('youtube_downloader.downloader.os.makedirs'):
+                    with patch('youtube_downloader.downloader.os.path.exists', return_value=False):
+                        with patch('youtube_downloader.downloader.os.path.join', side_effect=lambda *args: '/'.join(args)):
+                            stats = downloader.download(output_dir="./test")
+                            
+                            self.assertEqual(stats['total'], 2)
+                            self.assertEqual(stats['successful'], 2)
+                            self.assertEqual(stats['failed'], 0)
+                            self.assertEqual(len(stats['failed_videos']), 0)
 
 
 if __name__ == '__main__':

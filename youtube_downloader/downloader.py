@@ -536,33 +536,28 @@ class PlaylistDownloader:
                                itag: Optional[int], on_video_start: Optional[Callable],
                                on_video_complete: Optional[Callable]) -> bool:
         """Download a single video from the playlist."""
-        try:
-            if on_video_start:
-                on_video_start(video)
-            
-            # Create downloader for this video
-            downloader = YouTubeDownloader(video['url'], proxy_manager=self.proxy_manager)
-            
-            # Generate safe filename from title
-            safe_title = "".join(c for c in video.get('title', 'video') if c.isalnum() or c in (' ', '-', '_')).strip()
-            safe_title = safe_title.replace(' ', '_')[:100]  # Limit length
-            output_file = os.path.join(output_dir, f"{safe_title}.mp4")
-            
-            # Skip if file already exists (resume support)
-            if os.path.exists(output_file):
-                print(f"✓ Skipping {video.get('title', 'video')} (already exists)")
-                if on_video_complete:
-                    on_video_complete(video, output_file)
-                return True
-            
-            # Download the video
-            downloader.download(output_file, quality=quality, itag=itag)
-            
+        if on_video_start:
+            on_video_start(video)
+        
+        # Create downloader for this video
+        downloader = YouTubeDownloader(video['url'], proxy_manager=self.proxy_manager)
+        
+        # Generate safe filename from title
+        safe_title = "".join(c for c in video.get('title', 'video') if c.isalnum() or c in (' ', '-', '_')).strip()
+        safe_title = safe_title.replace(' ', '_')[:100]  # Limit length
+        output_file = os.path.join(output_dir, f"{safe_title}.mp4")
+        
+        # Skip if file already exists (resume support)
+        if os.path.exists(output_file):
+            print(f"✓ Skipping {video.get('title', 'video')} (already exists)")
             if on_video_complete:
                 on_video_complete(video, output_file)
-            
             return True
-            
-        except Exception as e:
-            print(f"✗ Failed to download {video.get('title', 'Unknown')}: {e}")
-            return False
+        
+        # Download the video
+        downloader.download(output_file, quality=quality, itag=itag)
+        
+        if on_video_complete:
+            on_video_complete(video, output_file)
+        
+        return True

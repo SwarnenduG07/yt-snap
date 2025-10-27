@@ -83,7 +83,13 @@ def main():
             output_dir = sys.argv[i + 1]
             i += 2
         elif sys.argv[i] == '--concurrency' and i + 1 < len(sys.argv):
-            concurrency = int(sys.argv[i + 1])
+            try:
+                concurrency = int(sys.argv[i + 1])
+                if concurrency < 1:
+                    raise ValueError
+            except ValueError:
+                print("Error: --concurrency must be a positive integer")
+                sys.exit(1)
             i += 2
         elif sys.argv[i] == '--help' or sys.argv[i] == '-h':
             print_usage()
