@@ -38,6 +38,8 @@ pip install ytsnap
 
 ## CLI Usage
 
+### Single Video Download
+
 ```bash
 # Basic download
 ytsnap "https://www.youtube.com/watch?v=VIDEO_ID"
@@ -61,12 +63,31 @@ ytsnap "https://www.youtube.com/watch?v=VIDEO_ID" video.mp4 --proxy "http://127.
 ytsnap "https://www.youtube.com/watch?v=VIDEO_ID" video.mp4 --proxy "http://user:pass@proxy.com:8080"
 ```
 
+### Playlist Download
+
+```bash
+# Download entire playlist (auto-detects playlist URL)
+ytsnap "https://www.youtube.com/playlist?list=PLxxx"
+
+# Download playlist with custom output directory
+ytsnap "https://www.youtube.com/playlist?list=PLxxx" --output-dir "./my_playlist"
+
+# Download playlist with specific quality
+ytsnap "https://www.youtube.com/playlist?list=PLxxx" --output-dir "./downloads" --quality 720p
+
+# Download playlist with custom concurrency
+ytsnap "https://www.youtube.com/playlist?list=PLxxx" --output-dir "./downloads" --concurrency 5
+
+# Download playlist with proxies
+ytsnap "https://www.youtube.com/playlist?list=PLxxx" --output-dir "./downloads" --proxy-file proxies.txt
+```
+
 ## Library Usage
 
 ```python
-from youtube_downloader import YouTubeDownloader, ProxyManager, ProxyConfig
+from youtube_downloader import YouTubeDownloader, PlaylistDownloader, ProxyManager, ProxyConfig
 
-# Initialize downloader
+# === Single Video Download ===
 downloader = YouTubeDownloader("https://www.youtube.com/watch?v=VIDEO_ID")
 
 # Get available formats
@@ -88,11 +109,44 @@ proxy_manager = ProxyManager.from_file("proxies.txt")
 downloader = YouTubeDownloader("https://www.youtube.com/watch?v=VIDEO_ID", proxy_manager=proxy_manager)
 downloader.download("video_with_proxy.mp4")
 
+# === Playlist Download ===
+playlist_url = "https://www.youtube.com/playlist?list=PLxxx"
+
+# Initialize playlist downloader
+playlist_downloader = PlaylistDownloader(playlist_url, concurrency=3)
+
+# Get list of videos in playlist
+videos = playlist_downloader.get_videos()
+print(f"Found {len(videos)} videos in playlist")
+
+# Download entire playlist
+stats = playlist_downloader.download(output_dir="./downloads")
+
+# Download playlist with specific quality
+stats = playlist_downloader.download(output_dir="./downloads", quality="720p")
+
+# Download playlist with custom callbacks
+def on_start(video):
+    print(f"Starting download: {video['title']}")
+
+def on_complete(video, output_file):
+    print(f"Completed: {video['title']} -> {output_file}")
+
+def on_error(video, error):
+    print(f"Error downloading {video['title']}: {error}")
+
+stats = playlist_downloader.download(
+    output_dir="./downloads",
+    on_video_start=on_start,
+    on_video_complete=on_complete,
+    on_error=on_error
+)
+
 # Use single proxy
 proxy_config = ProxyConfig(host="127.0.0.1", port=8080, scheme="http")
 proxy_manager = ProxyManager(proxies=[proxy_config])
-downloader = YouTubeDownloader("https://www.youtube.com/watch?v=VIDEO_ID", proxy_manager=proxy_manager)
-downloader.download("video.mp4")
+playlist_downloader = PlaylistDownloader(playlist_url, proxy_manager=proxy_manager)
+playlist_downloader.download("playlist_videos")
 ```
 
 ## Features
@@ -108,6 +162,9 @@ downloader.download("video.mp4")
 - ✅ **Proxy rotation** to bypass rate limits
 - ✅ **Automatic failover** and health checking
 - ✅ **Proxy authentication** support
+- ✅ **Playlist download** support with parallel downloading
+- ✅ **Resume support** - skips already downloaded videos
+- ✅ **Configurable concurrency** for playlist downloads
 
 ## Proxy Support
 
